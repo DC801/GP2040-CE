@@ -1,3 +1,7 @@
+## DC801 Fork
+
+Note that this is a fork of the GP2040-CE project made to act as the firmware for the RP2040 Chip on the DC801 Defcon 32 Controller Badge. The intent of the fork is to add support for both a TLA2528 ADC Chip, as well as Bluetooth controller support using an ESP32-C3 Super Mini module. All info below here in the readme is unmodified from the original repository, and this repo may not be updated with the latest features from the GP2040 team in the future.
+
 <p align="center">
   <a href="https://gp2040-ce.info">
     <img alt="GP2040-CE" src="https://raw.githubusercontent.com/OpenStickCommunity/Site/main/docs/assets/images/gp2040-ce-logo.png" />
