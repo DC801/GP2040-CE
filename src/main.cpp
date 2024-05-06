@@ -34,9 +34,10 @@ void core1() {
 int main() {
 	// Create GP2040 Main Core (core0), Core1 is dependent on Core0
 	GP2040 * gp2040 = new GP2040();
+	gp2040->setup();
+
 	I2CAnalogTLA2528 * tla2528 = new I2CAnalogTLA2528();
 	tla2528->test();
-	gp2040->setup();
 
 	// Create GP2040 Thread for Core1
 	multicore_launch_core1(core1);
