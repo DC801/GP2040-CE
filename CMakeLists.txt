@@ -206,6 +206,7 @@ src/addons/dualdirectional.cpp
 src/addons/keyboard_host.cpp
 src/addons/keyboard_host_listener.cpp
 src/addons/i2canalog1219.cpp
+src/addons/i2c_analog_tla2528.cpp
 src/addons/jslider.cpp
 src/addons/display.cpp
 src/addons/neopicoleds.cpp
@@ -250,6 +251,7 @@ WiiExtension
 SNESpad
 pico_mbedtls
 nanopb
+TLA2528
 )
 
 target_include_directories(${PROJECT_NAME} PUBLIC
