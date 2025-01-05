@@ -23,7 +23,7 @@
 #include "peripheral_spi.h"
 
 #ifndef HAS_I2C_DISPLAY
-#define HAS_I2C_DISPLAY -1
+#define HAS_I2C_DISPLAY 0
 #endif
 
 #ifndef DISPLAY_I2C_ADDR
@@ -186,6 +186,8 @@ public:
 	virtual void preprocess() {}
 	virtual void process();
 	virtual std::string name() { return DisplayName; }
+
+    void handleSystemRestart(GPEvent* e);
 private:
     bool updateDisplayScreen();
 	void drawStatusBar(Gamepad*);
@@ -209,6 +211,9 @@ private:
 	DisplayMode currDisplayMode;
     DisplayMode prevDisplayMode;
 	bool turnOffWhenSuspended;
+	uint32_t bootMode;
+
+    GPGFX_DisplayTypeOptions gpOptions;
 };
 
 #endif

@@ -25,10 +25,10 @@
 bool TurboInput::available() {
     // Turbo Button initialized by void Gamepad::setup()
     bool hasTurboAssigned = false;
-    GpioAction* pinMappings = Storage::getInstance().getProfilePinMappings();
+    GpioMappingInfo* pinMappings = Storage::getInstance().getProfilePinMappings();
     for (Pin_t pin = 0; pin < (Pin_t)NUM_BANK0_GPIOS; pin++)
     {
-        if ( pinMappings[pin] == GpioAction::BUTTON_PRESS_TURBO ) {
+        if ( pinMappings[pin].action == GpioAction::BUTTON_PRESS_TURBO ) {
             hasTurboAssigned = true;
             turboPinMask = 1 << pin;
             break;
@@ -41,6 +41,7 @@ void TurboInput::setup()
 {
     const TurboOptions& options = Storage::getInstance().getAddonOptions().turboOptions;
     uint32_t now = getMillis();
+
 
     // Turbo Dial
     uint8_t shotCount = std::clamp<uint8_t>(options.shotCount, TURBO_SHOT_MIN, TURBO_SHOT_MAX);
@@ -55,13 +56,17 @@ void TurboInput::setup()
         dialValue = 0;
     }
 
-    // Setup Turbo LED if available
-    if (isValidPin(options.ledPin)) {
+    // Setup Turbo PWM LED if available (RGB is handled in neopicoleds.cpp)
+    if (isValidPin(options.ledPin) && options.turboLedType == PLED_TYPE_PWM) {
         hasLedPin = true;
         gpio_init(options.ledPin);
         gpio_set_dir(options.ledPin, GPIO_OUT);
         gpio_put(options.ledPin, 1);
     }
+
+    Gamepad * gamepad = Storage::getInstance().GetProcessedGamepad();
+	gamepad->auxState.turbo.enabled = true;
+    gamepad->auxState.turbo.active = 1;
 
     // SHMUP Mode
     if ( options.shmupModeEnabled ) {
@@ -103,6 +108,7 @@ void TurboInput::setup()
     bTurboFlicker = false;
     updateInterval(shotCount);
     nextTimer = getMicro();
+    encoderValue = shotCount;
 }
 
 /**
@@ -111,10 +117,10 @@ void TurboInput::setup()
 void TurboInput::reinit()
 {
     turboPinMask = 0;
-    GpioAction* pinMappings = Storage::getInstance().getProfilePinMappings();
+    GpioMappingInfo* pinMappings = Storage::getInstance().getProfilePinMappings();
     for (Pin_t pin = 0; pin < (Pin_t)NUM_BANK0_GPIOS; pin++)
     {
-        if ( pinMappings[pin] == GpioAction::BUTTON_PRESS_TURBO ) {
+        if ( pinMappings[pin].action == GpioAction::BUTTON_PRESS_TURBO ) {
             turboPinMask = 1 << pin;
             break;
         }
@@ -192,15 +198,21 @@ void TurboInput::process()
     // OFF: No turbo buttons enabled
     // ON: 1 or more turbo buttons enabled
     // BLINK: OFF on turbo shot, ON on turbo flicker
-    if (hasLedPin) {
-        // Turbo toggled on
-        if (turboButtonsMask) {
-            if (gamepad->state.buttons & turboButtonsMask)
-                gpio_put(options.ledPin, bTurboFlicker ? TURBO_LED_STATE_ON : TURBO_LED_STATE_OFF);
-            else
-                gpio_put(options.ledPin, TURBO_LED_STATE_ON);
-        }
-        else {
+    Gamepad * processedGamepad = Storage::getInstance().GetProcessedGamepad();
+    if (turboButtonsMask) {
+        if (gamepad->state.buttons & turboButtonsMask)
+            processedGamepad->auxState.turbo.activity = bTurboFlicker ? TURBO_LED_STATE_ON : TURBO_LED_STATE_OFF;
+        else
+            processedGamepad->auxState.turbo.activity = TURBO_LED_STATE_ON;
+    } else {
+        processedGamepad->auxState.turbo.activity = TURBO_LED_STATE_OFF;
+    }
+
+    // PWM LED Pin
+    if ( hasLedPin ) {
+        if ( processedGamepad->auxState.turbo.activity == TURBO_LED_STATE_ON ) {
+            gpio_put(options.ledPin, TURBO_LED_STATE_ON);
+        } else {
             gpio_put(options.ledPin, TURBO_LED_STATE_OFF);
         }
     }

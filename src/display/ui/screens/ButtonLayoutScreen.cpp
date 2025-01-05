@@ -3,6 +3,7 @@
 #include "drivermanager.h"
 #include "drivers/ps4/PS4Driver.h"
 #include "drivers/xbone/XBOneDriver.h"
+#include "drivers/xinput/XInputDriver.h"
 
 void ButtonLayoutScreen::init() {
     const InputHistoryOptions& inputHistoryOptions = Storage::getInstance().getAddonOptions().inputHistoryOptions;
@@ -10,9 +11,13 @@ void ButtonLayoutScreen::init() {
     inputHistoryX = inputHistoryOptions.row;
     inputHistoryY = inputHistoryOptions.col;
     inputHistoryLength = inputHistoryOptions.length;
-    profileDelayStart = getMillis();
+    bannerDelayStart = getMillis();
     gamepad = Storage::getInstance().GetGamepad();
     inputMode = DriverManager::getInstance().getInputMode();
+
+    EventManager::getInstance().registerEventHandler(GP_EVENT_PROFILE_CHANGE, GPEVENT_CALLBACK(this->handleProfileChange(event)));
+    EventManager::getInstance().registerEventHandler(GP_EVENT_USBHOST_MOUNT, GPEVENT_CALLBACK(this->handleUSB(event)));
+    EventManager::getInstance().registerEventHandler(GP_EVENT_USBHOST_UNMOUNT, GPEVENT_CALLBACK(this->handleUSB(event)));
     
     footer = "";
     historyString = "";
@@ -32,20 +37,23 @@ void ButtonLayoutScreen::init() {
     }
 
 	// start with profile mode displayed
-	profileModeDisplay = true;
+	bannerDisplay = true;
     prevProfileNumber = -1;
+
     prevLayoutLeft = Storage::getInstance().getDisplayOptions().buttonLayout;
     prevLayoutRight = Storage::getInstance().getDisplayOptions().buttonLayoutRight;
+    prevLeftOptions = Storage::getInstance().getDisplayOptions().buttonLayoutCustomOptions.paramsLeft;
+    prevRightOptions = Storage::getInstance().getDisplayOptions().buttonLayoutCustomOptions.paramsRight;
 
     // we cannot look at macro options enabled, pull the pins
     
     // macro display now uses our pin functions, so we need to check if pins are enabled...
     macroEnabled = false;
     // Macro Button initialized by void Gamepad::setup()
-    GpioAction* pinMappings = Storage::getInstance().getProfilePinMappings();
+    GpioMappingInfo* pinMappings = Storage::getInstance().getProfilePinMappings();
     for (Pin_t pin = 0; pin < (Pin_t)NUM_BANK0_GPIOS; pin++)
     {
-        switch( pinMappings[pin] ) {
+        switch( pinMappings[pin].action ) {
             case GpioAction::BUTTON_PRESS_MACRO:
             case GpioAction::BUTTON_PRESS_MACRO_1:
             case GpioAction::BUTTON_PRESS_MACRO_2:
@@ -76,7 +84,7 @@ int8_t ButtonLayoutScreen::update() {
         uint8_t layoutLeft = Storage::getInstance().getDisplayOptions().buttonLayout;
         uint8_t layoutRight = Storage::getInstance().getDisplayOptions().buttonLayoutRight;
         bool inputHistoryEnabled = Storage::getInstance().getAddonOptions().inputHistoryOptions.enabled;
-        if ((prevLayoutLeft != layoutLeft) || (prevLayoutRight != layoutRight) || (isInputHistoryEnabled != inputHistoryEnabled)) {
+        if ((prevLayoutLeft != layoutLeft) || (prevLayoutRight != layoutRight) || (isInputHistoryEnabled != inputHistoryEnabled) || compareCustomLayouts()) {
             shutdown();
             init();
         }
@@ -84,9 +92,9 @@ int8_t ButtonLayoutScreen::update() {
 
     // main logic loop
     if (prevProfileNumber != profileNumber) {
-        profileDelayStart = getMillis();
+        bannerDelayStart = getMillis();
         prevProfileNumber = profileNumber;
-        profileModeDisplay = true;
+        bannerDisplay = true;
     }
 
     // main logic loop
@@ -112,24 +120,35 @@ int8_t ButtonLayoutScreen::update() {
 void ButtonLayoutScreen::generateHeader() {
 	// Limit to 21 chars with 6x8 font for now
 	statusBar.clear();
+	Storage& storage = Storage::getInstance();
 
 	// Display Profile # banner
-	if ( profileModeDisplay ) {
-		if (((getMillis() - profileDelayStart) / 1000) < profileDelay) {
-			statusBar = "     Profile #";
-			statusBar +=  std::to_string(getGamepad()->getOptions().profileNumber);
-        	return;
+	if ( bannerDisplay ) {
+		if (((getMillis() - bannerDelayStart) / 1000) < bannerDelay) {
+			if (bannerMessage.empty()) {
+				statusBar.assign(storage.currentProfileLabel(), strlen(storage.currentProfileLabel()));
+				if (statusBar.empty()) {
+					statusBar = "     Profile #";
+					statusBar +=  std::to_string(getGamepad()->getOptions().profileNumber);
+				} else {
+					statusBar.insert(statusBar.begin(), (21-statusBar.length())/2, ' ');
+				}
+			} else {
+				statusBar = bannerMessage;
+			}
+			return;
 		} else {
-			profileModeDisplay = false;
+			bannerDisplay = false;
+            bannerMessage.clear();
 		}
 	}
 
 	// Display standard header
 	switch (inputMode)
 	{
-		case INPUT_MODE_HID:    statusBar += "DINPUT"; break;
+		case INPUT_MODE_PS3:    statusBar += "PS3"; break;
+		case INPUT_MODE_GENERIC: statusBar += "USBHID"; break;
 		case INPUT_MODE_SWITCH: statusBar += "SWITCH"; break;
-		case INPUT_MODE_XINPUT: statusBar += "XINPUT"; break;
 		case INPUT_MODE_MDMINI: statusBar += "GEN/MD"; break;
 		case INPUT_MODE_NEOGEO: statusBar += "NGMINI"; break;
 		case INPUT_MODE_PCEMINI: statusBar += "PCE/TG"; break;
@@ -158,11 +177,18 @@ void ButtonLayoutScreen::generateHeader() {
 			else
 				statusBar += "*";
 			break;
+		case INPUT_MODE_XINPUT:
+            statusBar += "X";
+            if(((XInputDriver*)DriverManager::getInstance().getDriver())->getAuthEnabled() == true )
+                statusBar += "B360";
+            else
+                statusBar += "INPUT";
+            break;
 		case INPUT_MODE_KEYBOARD: statusBar += "HID-KB"; break;
 		case INPUT_MODE_CONFIG: statusBar += "CONFIG"; break;
 	}
 
-	const TurboOptions& turboOptions = Storage::getInstance().getAddonOptions().turboOptions;
+	const TurboOptions& turboOptions = storage.getAddonOptions().turboOptions;
 	if ( turboOptions.enabled ) {
 		statusBar += " T";
 		if ( turboOptions.shotCount < 10 ) // padding
@@ -174,7 +200,7 @@ void ButtonLayoutScreen::generateHeader() {
 
 	const GamepadOptions & options = gamepad->getOptions();
 
-	switch (gamepad->getOptions().dpadMode)
+	switch (gamepad->getActiveDpadMode())
 	{
 		case DPAD_MODE_DIGITAL:      statusBar += " D"; break;
 		case DPAD_MODE_LEFT_ANALOG:  statusBar += " L"; break;
@@ -194,7 +220,7 @@ void ButtonLayoutScreen::generateHeader() {
 }
 
 void ButtonLayoutScreen::drawScreen() {
-    if (profileModeDisplay) {
+    if (bannerDisplay) {
         getRenderer()->drawRectangle(0, 0, 128, 7, true, true);
     	getRenderer()->drawText(0, 0, statusBar, true);
     } else {
@@ -293,20 +319,20 @@ void ButtonLayoutScreen::processInputHistory() {
 		pressedDownLeft(),
 		pressedDownRight(),
 
-		getGamepad()->pressedB1(),
-		getGamepad()->pressedB2(),
-		getGamepad()->pressedB3(),
-		getGamepad()->pressedB4(),
-		getGamepad()->pressedL1(),
-		getGamepad()->pressedR1(),
-		getGamepad()->pressedL2(),
-		getGamepad()->pressedR2(),
-		getGamepad()->pressedS1(),
-		getGamepad()->pressedS2(),
-		getGamepad()->pressedL3(),
-		getGamepad()->pressedR3(),
-		getGamepad()->pressedA1(),
-		getGamepad()->pressedA2(),
+		getProcessedGamepad()->pressedB1(),
+		getProcessedGamepad()->pressedB2(),
+		getProcessedGamepad()->pressedB3(),
+		getProcessedGamepad()->pressedB4(),
+		getProcessedGamepad()->pressedL1(),
+		getProcessedGamepad()->pressedR1(),
+		getProcessedGamepad()->pressedL2(),
+		getProcessedGamepad()->pressedR2(),
+		getProcessedGamepad()->pressedS1(),
+		getProcessedGamepad()->pressedS2(),
+		getProcessedGamepad()->pressedL3(),
+		getProcessedGamepad()->pressedR3(),
+		getProcessedGamepad()->pressedA1(),
+		getProcessedGamepad()->pressedA2(),
 	};
 
 	uint8_t mode = ((displayModeLookup.count(getGamepad()->getOptions().inputMode) > 0) ? displayModeLookup.at(getGamepad()->getOptions().inputMode) : 0);
@@ -362,13 +388,24 @@ void ButtonLayoutScreen::processInputHistory() {
     footer = historyString;
 }
 
+bool ButtonLayoutScreen::compareCustomLayouts()
+{
+    ButtonLayoutParamsLeft leftOptions = Storage::getInstance().getDisplayOptions().buttonLayoutCustomOptions.paramsLeft;
+    ButtonLayoutParamsRight rightOptions = Storage::getInstance().getDisplayOptions().buttonLayoutCustomOptions.paramsRight;
+
+    bool leftChanged = ((leftOptions.layout != prevLeftOptions.layout) || (leftOptions.common.startX != prevLeftOptions.common.startX) || (leftOptions.common.startY != prevLeftOptions.common.startY) || (leftOptions.common.buttonPadding != prevLeftOptions.common.buttonPadding) || (leftOptions.common.buttonRadius != prevLeftOptions.common.buttonRadius));
+    bool rightChanged = ((rightOptions.layout != prevRightOptions.layout) || (rightOptions.common.startX != prevRightOptions.common.startX) || (rightOptions.common.startY != prevRightOptions.common.startY) || (rightOptions.common.buttonPadding != prevRightOptions.common.buttonPadding) || (rightOptions.common.buttonRadius != prevRightOptions.common.buttonRadius));
+    
+    return (leftChanged || rightChanged);
+}
+
 bool ButtonLayoutScreen::pressedUp()
 {
-    switch (getGamepad()->getOptions().dpadMode)
+    switch (getGamepad()->getActiveDpadMode())
     {
-        case DPAD_MODE_DIGITAL:      return ((getGamepad()->state.dpad & GAMEPAD_MASK_DPAD) == GAMEPAD_MASK_UP);
-        case DPAD_MODE_LEFT_ANALOG:  return getGamepad()->state.ly == GAMEPAD_JOYSTICK_MIN;
-        case DPAD_MODE_RIGHT_ANALOG: return getGamepad()->state.ry == GAMEPAD_JOYSTICK_MIN;
+        case DPAD_MODE_DIGITAL:      return ((getProcessedGamepad()->state.dpad & GAMEPAD_MASK_DPAD) == GAMEPAD_MASK_UP);
+        case DPAD_MODE_LEFT_ANALOG:  return getProcessedGamepad()->state.ly == GAMEPAD_JOYSTICK_MIN;
+        case DPAD_MODE_RIGHT_ANALOG: return getProcessedGamepad()->state.ry == GAMEPAD_JOYSTICK_MIN;
     }
 
     return false;
@@ -376,11 +413,11 @@ bool ButtonLayoutScreen::pressedUp()
 
 bool ButtonLayoutScreen::pressedDown()
 {
-    switch (getGamepad()->getOptions().dpadMode)
+    switch (getGamepad()->getActiveDpadMode())
     {
-        case DPAD_MODE_DIGITAL:      return ((getGamepad()->state.dpad & GAMEPAD_MASK_DPAD) == GAMEPAD_MASK_DOWN);
-        case DPAD_MODE_LEFT_ANALOG:  return getGamepad()->state.ly == GAMEPAD_JOYSTICK_MAX;
-        case DPAD_MODE_RIGHT_ANALOG: return getGamepad()->state.ry == GAMEPAD_JOYSTICK_MAX;
+        case DPAD_MODE_DIGITAL:      return ((getProcessedGamepad()->state.dpad & GAMEPAD_MASK_DPAD) == GAMEPAD_MASK_DOWN);
+        case DPAD_MODE_LEFT_ANALOG:  return getProcessedGamepad()->state.ly == GAMEPAD_JOYSTICK_MAX;
+        case DPAD_MODE_RIGHT_ANALOG: return getProcessedGamepad()->state.ry == GAMEPAD_JOYSTICK_MAX;
     }
 
     return false;
@@ -388,11 +425,11 @@ bool ButtonLayoutScreen::pressedDown()
 
 bool ButtonLayoutScreen::pressedLeft()
 {
-    switch (getGamepad()->getOptions().dpadMode)
+    switch (getGamepad()->getActiveDpadMode())
     {
-        case DPAD_MODE_DIGITAL:      return ((getGamepad()->state.dpad & GAMEPAD_MASK_DPAD) == GAMEPAD_MASK_LEFT);
-        case DPAD_MODE_LEFT_ANALOG:  return getGamepad()->state.lx == GAMEPAD_JOYSTICK_MIN;
-        case DPAD_MODE_RIGHT_ANALOG: return getGamepad()->state.rx == GAMEPAD_JOYSTICK_MIN;
+        case DPAD_MODE_DIGITAL:      return ((getProcessedGamepad()->state.dpad & GAMEPAD_MASK_DPAD) == GAMEPAD_MASK_LEFT);
+        case DPAD_MODE_LEFT_ANALOG:  return getProcessedGamepad()->state.lx == GAMEPAD_JOYSTICK_MIN;
+        case DPAD_MODE_RIGHT_ANALOG: return getProcessedGamepad()->state.rx == GAMEPAD_JOYSTICK_MIN;
     }
 
     return false;
@@ -400,11 +437,11 @@ bool ButtonLayoutScreen::pressedLeft()
 
 bool ButtonLayoutScreen::pressedRight()
 {
-    switch (getGamepad()->getOptions().dpadMode)
+    switch (getGamepad()->getActiveDpadMode())
     {
-        case DPAD_MODE_DIGITAL:      return ((getGamepad()->state.dpad & GAMEPAD_MASK_DPAD) == GAMEPAD_MASK_RIGHT);
-        case DPAD_MODE_LEFT_ANALOG:  return getGamepad()->state.lx == GAMEPAD_JOYSTICK_MAX;
-        case DPAD_MODE_RIGHT_ANALOG: return getGamepad()->state.rx == GAMEPAD_JOYSTICK_MAX;
+        case DPAD_MODE_DIGITAL:      return ((getProcessedGamepad()->state.dpad & GAMEPAD_MASK_DPAD) == GAMEPAD_MASK_RIGHT);
+        case DPAD_MODE_LEFT_ANALOG:  return getProcessedGamepad()->state.lx == GAMEPAD_JOYSTICK_MAX;
+        case DPAD_MODE_RIGHT_ANALOG: return getProcessedGamepad()->state.rx == GAMEPAD_JOYSTICK_MAX;
     }
 
     return false;
@@ -412,11 +449,11 @@ bool ButtonLayoutScreen::pressedRight()
 
 bool ButtonLayoutScreen::pressedUpLeft()
 {
-    switch (getGamepad()->getOptions().dpadMode)
+    switch (getGamepad()->getActiveDpadMode())
     {
-        case DPAD_MODE_DIGITAL:      return ((getGamepad()->state.dpad & GAMEPAD_MASK_DPAD) == (GAMEPAD_MASK_UP | GAMEPAD_MASK_LEFT));
-        case DPAD_MODE_LEFT_ANALOG:  return (getGamepad()->state.lx == GAMEPAD_JOYSTICK_MIN) && (getGamepad()->state.ly == GAMEPAD_JOYSTICK_MIN);
-        case DPAD_MODE_RIGHT_ANALOG: return (getGamepad()->state.rx == GAMEPAD_JOYSTICK_MIN) && (getGamepad()->state.ry == GAMEPAD_JOYSTICK_MIN);
+        case DPAD_MODE_DIGITAL:      return ((getProcessedGamepad()->state.dpad & GAMEPAD_MASK_DPAD) == (GAMEPAD_MASK_UP | GAMEPAD_MASK_LEFT));
+        case DPAD_MODE_LEFT_ANALOG:  return (getProcessedGamepad()->state.lx == GAMEPAD_JOYSTICK_MIN) && (getProcessedGamepad()->state.ly == GAMEPAD_JOYSTICK_MIN);
+        case DPAD_MODE_RIGHT_ANALOG: return (getProcessedGamepad()->state.rx == GAMEPAD_JOYSTICK_MIN) && (getProcessedGamepad()->state.ry == GAMEPAD_JOYSTICK_MIN);
     }
 
     return false;
@@ -424,11 +461,11 @@ bool ButtonLayoutScreen::pressedUpLeft()
 
 bool ButtonLayoutScreen::pressedUpRight()
 {
-    switch (getGamepad()->getOptions().dpadMode)
+    switch (getGamepad()->getActiveDpadMode())
     {
-        case DPAD_MODE_DIGITAL:      return ((getGamepad()->state.dpad & GAMEPAD_MASK_DPAD) == (GAMEPAD_MASK_UP | GAMEPAD_MASK_RIGHT));
-        case DPAD_MODE_LEFT_ANALOG:  return (getGamepad()->state.lx == GAMEPAD_JOYSTICK_MAX) && (getGamepad()->state.ly == GAMEPAD_JOYSTICK_MIN);
-        case DPAD_MODE_RIGHT_ANALOG: return (getGamepad()->state.lx == GAMEPAD_JOYSTICK_MAX) && (getGamepad()->state.ly == GAMEPAD_JOYSTICK_MIN);
+        case DPAD_MODE_DIGITAL:      return ((getProcessedGamepad()->state.dpad & GAMEPAD_MASK_DPAD) == (GAMEPAD_MASK_UP | GAMEPAD_MASK_RIGHT));
+        case DPAD_MODE_LEFT_ANALOG:  return (getProcessedGamepad()->state.lx == GAMEPAD_JOYSTICK_MAX) && (getProcessedGamepad()->state.ly == GAMEPAD_JOYSTICK_MIN);
+        case DPAD_MODE_RIGHT_ANALOG: return (getProcessedGamepad()->state.lx == GAMEPAD_JOYSTICK_MAX) && (getProcessedGamepad()->state.ly == GAMEPAD_JOYSTICK_MIN);
     }
 
     return false;
@@ -436,11 +473,11 @@ bool ButtonLayoutScreen::pressedUpRight()
 
 bool ButtonLayoutScreen::pressedDownLeft()
 {
-    switch (getGamepad()->getOptions().dpadMode)
+    switch (getGamepad()->getActiveDpadMode())
     {
-        case DPAD_MODE_DIGITAL:      return ((getGamepad()->state.dpad & GAMEPAD_MASK_DPAD) == (GAMEPAD_MASK_DOWN | GAMEPAD_MASK_LEFT));
-        case DPAD_MODE_LEFT_ANALOG:  return (getGamepad()->state.lx == GAMEPAD_JOYSTICK_MIN) && (getGamepad()->state.ly == GAMEPAD_JOYSTICK_MAX);
-        case DPAD_MODE_RIGHT_ANALOG: return (getGamepad()->state.lx == GAMEPAD_JOYSTICK_MIN) && (getGamepad()->state.ly == GAMEPAD_JOYSTICK_MAX);
+        case DPAD_MODE_DIGITAL:      return ((getProcessedGamepad()->state.dpad & GAMEPAD_MASK_DPAD) == (GAMEPAD_MASK_DOWN | GAMEPAD_MASK_LEFT));
+        case DPAD_MODE_LEFT_ANALOG:  return (getProcessedGamepad()->state.lx == GAMEPAD_JOYSTICK_MIN) && (getProcessedGamepad()->state.ly == GAMEPAD_JOYSTICK_MAX);
+        case DPAD_MODE_RIGHT_ANALOG: return (getProcessedGamepad()->state.lx == GAMEPAD_JOYSTICK_MIN) && (getProcessedGamepad()->state.ly == GAMEPAD_JOYSTICK_MAX);
     }
 
     return false;
@@ -448,12 +485,32 @@ bool ButtonLayoutScreen::pressedDownLeft()
 
 bool ButtonLayoutScreen::pressedDownRight()
 {
-    switch (getGamepad()->getOptions().dpadMode)
+    switch (getGamepad()->getActiveDpadMode())
     {
-        case DPAD_MODE_DIGITAL:      return ((getGamepad()->state.dpad & GAMEPAD_MASK_DPAD) == (GAMEPAD_MASK_DOWN | GAMEPAD_MASK_RIGHT));
-        case DPAD_MODE_LEFT_ANALOG:  return (getGamepad()->state.lx == GAMEPAD_JOYSTICK_MAX) && (getGamepad()->state.ly == GAMEPAD_JOYSTICK_MAX);
-        case DPAD_MODE_RIGHT_ANALOG: return (getGamepad()->state.lx == GAMEPAD_JOYSTICK_MAX) && (getGamepad()->state.ly == GAMEPAD_JOYSTICK_MAX);
+        case DPAD_MODE_DIGITAL:      return ((getProcessedGamepad()->state.dpad & GAMEPAD_MASK_DPAD) == (GAMEPAD_MASK_DOWN | GAMEPAD_MASK_RIGHT));
+        case DPAD_MODE_LEFT_ANALOG:  return (getProcessedGamepad()->state.lx == GAMEPAD_JOYSTICK_MAX) && (getProcessedGamepad()->state.ly == GAMEPAD_JOYSTICK_MAX);
+        case DPAD_MODE_RIGHT_ANALOG: return (getProcessedGamepad()->state.lx == GAMEPAD_JOYSTICK_MAX) && (getProcessedGamepad()->state.ly == GAMEPAD_JOYSTICK_MAX);
     }
 
     return false;
+}
+
+void ButtonLayoutScreen::handleProfileChange(GPEvent* e) {
+    GPProfileChangeEvent* event = (GPProfileChangeEvent*)e;
+
+    profileNumber = event->currentValue;
+    prevProfileNumber = event->previousValue;
+}
+
+void ButtonLayoutScreen::handleUSB(GPEvent* e) {
+    GPUSBHostEvent* event = (GPUSBHostEvent*)e;
+    bannerDelayStart = getMillis();
+    prevProfileNumber = profileNumber;
+
+    if (e->eventType() == GP_EVENT_USBHOST_MOUNT) {
+        bannerMessage = "    USB Connected";
+    } else if (e->eventType() == GP_EVENT_USBHOST_UNMOUNT) {
+        bannerMessage = "  USB Disconnnected";
+    }
+    bannerDisplay = true;
 }

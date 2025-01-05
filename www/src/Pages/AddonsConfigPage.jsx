@@ -9,17 +9,24 @@ import set from 'lodash/set';
 
 import { AppContext } from '../Contexts/AppContext';
 
+import { hexToInt } from '../Services/Utilities';
+
 import WebApi from '../Services/WebApi';
 import Analog, { analogScheme, analogState } from '../Addons/Analog';
-import Analog1256, { analog1256Scheme, analog1256State } from '../Addons/Analog1256';
+import Analog1256, {
+	analog1256Scheme,
+	analog1256State,
+} from '../Addons/Analog1256';
 import Bootsel, { bootselScheme, bootselState } from '../Addons/Bootsel';
 import Buzzer, { buzzerScheme, buzzerState } from '../Addons/Buzzer';
 import DualDirection, {
 	dualDirectionScheme,
 	dualDirectionState,
 } from '../Addons/DualDirection';
-import I2CAnalog1219, { i2cAnalogScheme, i2cAnalogState } from '../Addons/I2CAnalog1219';
-import Joystick, { joystickScheme, joystickState } from '../Addons/Joystick';
+import I2CAnalog1219, {
+	i2cAnalogScheme,
+	i2cAnalogState,
+} from '../Addons/I2CAnalog1219';
 import OnBoardLed, {
 	onBoardLedScheme,
 	onBoardLedState,
@@ -39,8 +46,22 @@ import FocusMode, {
 	focusModeState,
 } from '../Addons/FocusMode';
 import Keyboard, { keyboardScheme, keyboardState } from '../Addons/Keyboard';
-import InputHistory, { inputHistoryScheme, inputHistoryState } from '../Addons/InputHistory';
+import GamepadUSBHost, { gamepadUSBHostScheme, gamepadUSBHostState} from '../Addons/GamepadUSBHost';
+import InputHistory, {
+	inputHistoryScheme,
+	inputHistoryState,
+} from '../Addons/InputHistory';
 import Rotary, { rotaryScheme, rotaryState } from '../Addons/Rotary';
+import PCF8575, { pcf8575Scheme, pcf8575State } from '../Addons/PCF8575';
+import DRV8833Rumble, {
+	drv8833RumbleScheme,
+	drv8833RumbleState,
+} from '../Addons/DRV8833';
+import ReactiveLED, {
+	reactiveLEDScheme,
+	reactiveLEDState,
+} from '../Addons/ReactiveLED';
+import { rgbIntToHex } from '../Services/Utilities';
 
 const schema = yup.object().shape({
 	...analogScheme,
@@ -48,7 +69,6 @@ const schema = yup.object().shape({
 	...bootselScheme,
 	...onBoardLedScheme,
 	...turboScheme,
-	...joystickScheme,
 	...reverseScheme,
 	...i2cAnalogScheme,
 	...dualDirectionScheme,
@@ -61,6 +81,10 @@ const schema = yup.object().shape({
 	...keyboardScheme,
 	...inputHistoryScheme,
 	...rotaryScheme,
+	...pcf8575Scheme,
+	...drv8833RumbleScheme,
+	...reactiveLEDScheme,
+	...gamepadUSBHostScheme,
 });
 
 const defaultValues = {
@@ -69,7 +93,6 @@ const defaultValues = {
 	...bootselState,
 	...onBoardLedState,
 	...turboState,
-	...joystickState,
 	...reverseState,
 	...i2cAnalogState,
 	...dualDirectionState,
@@ -83,6 +106,10 @@ const defaultValues = {
 	...keyboardState,
 	...inputHistoryState,
 	...rotaryState,
+	...pcf8575State,
+	...drv8833RumbleState,
+	...reactiveLEDState,
+	...gamepadUSBHostState,
 };
 
 const ADDONS = [
@@ -90,7 +117,6 @@ const ADDONS = [
 	OnBoardLed,
 	Analog,
 	Turbo,
-	Joystick,
 	Reverse,
 	I2CAnalog1219,
 	Analog1256,
@@ -103,8 +129,12 @@ const ADDONS = [
 	SNES,
 	FocusMode,
 	Keyboard,
+	GamepadUSBHost,
 	InputHistory,
-    Rotary
+	Rotary,
+	PCF8575,
+	DRV8833Rumble,
+	ReactiveLED,
 ];
 
 const FormContext = ({ setStoredData }) => {
@@ -163,19 +193,25 @@ export default function AddonsConfigPage() {
 
 	const { t } = useTranslation();
 
-    useEffect(() => {
-        updatePeripherals();
-    }, []);
+	useEffect(() => {
+		updatePeripherals();
+	}, []);
 
 	const onSuccess = async (values) => {
 		const flattened = flattenObject(storedData);
-		const valuesCopy = schema.cast(values); // Strip invalid values
+
+        // Convert turbo LED color if available
+        const data = {
+            ...values,
+            turboLedColor: hexToInt(values.turboLedColor || '#000000')
+        };
+		const valuesSchema = schema.cast(data); // Strip invalid values
 
 		// Compare what's changed and set it to resultObject
 		let resultObject = {};
 		Object.entries(flattened)?.map((entry) => {
 			const [key, oldVal] = entry;
-			const newVal = get(valuesCopy, key);
+			const newVal = get(valuesSchema, key);
 			if (newVal !== oldVal) {
 				set(resultObject, key, newVal);
 			}
@@ -202,31 +238,34 @@ export default function AddonsConfigPage() {
 			onSubmit={onSuccess}
 			initialValues={defaultValues}
 		>
-			{({ handleSubmit, handleChange, values, errors, setFieldValue }) => 
-			console.log('errors', errors) || (
-				<Form noValidate onSubmit={handleSubmit}>
-					<h1>{t('AddonsConfig:header-text')}</h1>
-					<p>{t('AddonsConfig:sub-header-text')}</p>
-					{ADDONS.map((Addon, index) => (
-						<Addon
-							key={`addon-${index}`}
-							values={values}
-							errors={errors}
-							handleChange={handleChange}
-							handleCheckbox={handleCheckbox}
-							setFieldValue={setFieldValue}
-						/>
-					))}
+			{({ handleSubmit, handleChange, values, errors, setFieldValue }) =>
+				console.log('errors', errors) || (
+					<Form noValidate onSubmit={handleSubmit}>
+						<h1>{t('AddonsConfig:header-text')}</h1>
+						<p>{t('AddonsConfig:sub-header-text')}</p>
+						{ADDONS.map((Addon, index) => (
+							<Addon
+								key={`addon-${index}`}
+								values={values}
+								errors={errors}
+								handleChange={handleChange}
+								handleCheckbox={handleCheckbox}
+								setFieldValue={setFieldValue}
+							/>
+						))}
 
-					<div className="mt-3">
-						<Button type="submit" id="save">
-							{t('Common:button-save-label')}
-						</Button>
-						{saveMessage ? <span className="alert">{saveMessage}</span> : null}
-					</div>
-					<FormContext setStoredData={setStoredData} />
-				</Form>
-			)}
+						<div className="mt-3">
+							<Button type="submit" id="save">
+								{t('Common:button-save-label')}
+							</Button>
+							{saveMessage ? (
+								<span className="alert">{saveMessage}</span>
+							) : null}
+						</div>
+						<FormContext setStoredData={setStoredData} />
+					</Form>
+				)
+			}
 		</Formik>
 	);
 }

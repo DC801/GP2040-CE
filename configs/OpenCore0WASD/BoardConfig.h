@@ -74,7 +74,6 @@
 #define TURBO_ENABLED 1
 #define GPIO_PIN_27 GpioAction::BUTTON_PRESS_TURBO
 
-#define JSLIDER_ENABLED 1
 #define GPIO_PIN_26 GpioAction::SUSTAIN_DP_MODE_LS
 #define GPIO_PIN_25 GpioAction::SUSTAIN_DP_MODE_RS
 
@@ -99,14 +98,23 @@
 #define LEDS_BUTTON_R2   9
 #define LEDS_BUTTON_B2   10
 #define LEDS_BUTTON_B1   11
+#define LEDS_BUTTON_A2   12
 
 #define PLED_TYPE PLED_TYPE_RGB
 #define PLED1_PIN 13
 #define PLED2_PIN 14
 #define PLED3_PIN 15
 #define PLED4_PIN 16
-
 #define PLED_COLOR ColorGreen
+
+#define TURBO_LED_INDEX 17
+#define TURBO_LED_TYPE PLED_TYPE_RGB
+#define TURBO_LED_COLOR ColorRed
+
+#define CASE_RGB_TYPE CASE_RGB_TYPE_STATIC
+#define CASE_RGB_INDEX 18
+#define CASE_RGB_COUNT 20
+#define CASE_RGB_COLOR ColorGreen
 
 #define HAS_I2C_DISPLAY 1
 #define I2C0_ENABLED 1

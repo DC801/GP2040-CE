@@ -9,7 +9,7 @@ export default {
 		'led-brightness-steps-label': 'Brightness Steps',
 	},
 	player: {
-		'header-text': 'Player LEDs (XInput)',
+		'header-text': 'Player LEDs',
 		'pwm-sub-header-text':
 			'For PWM LEDs, set each LED to a dedicated GPIO pin.',
 		'rgb-sub-header-text':
@@ -20,6 +20,17 @@ export default {
 		'pled-type-rgb': 'RGB',
 		'pled-color-label': 'RGB PLED Color',
 	},
+    case: {
+        'header-text': 'Case RGB LEDs',
+        'sub-header-text':
+			'For Case RGB LEDs, set a starting index and the case RGB count. The index must be after the last LED button defined but can be before or after the player LEDs and turbo LED.',
+		'case-index-label': 'RGB LED Index',
+        'case-count-label': 'RGB LED Count',
+        'case-type-label': 'Color Type',
+        'case-type-off': 'Off',
+        'case-type-static': 'Static',
+        'case-color-label': 'Case RGB Color',
+    },
 	'pled-pin-label': 'PLED #{{pin}} Pin',
 	'pled-index-label': 'PLED #{{index}} Index',
 	'rgb-order': {
@@ -31,5 +42,5 @@ export default {
 		'available-header-text': 'Available Buttons',
 		'assigned-header-text': 'Assigned Buttons',
 	},
-	'turn-off-when-suspended': 'Turn Off When Suspended'
+	'turn-off-when-suspended': 'Turn Off When Suspended',
 };
